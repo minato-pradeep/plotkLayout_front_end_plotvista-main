@@ -1,0 +1,289 @@
+<div class="relative flex-1 overflow-hidden bg-[#F8FAFC] select-none"
+  [class.cursor-grabbing]="isDragging()" [class.cursor-move]="isPanning()" [class.cursor-grab]="!isDragging() && !isPanning()"
+  [class.grayscale]="floor()?.isActive === false" [class.opacity-80]="floor()?.isActive === false"
+  (mousedown)="handleMouseDown($event)" (contextmenu)="$event.preventDefault()" (wheel)="handleWheel($event)">
+
+  @if (floor()?.isActive === false) {
+    <div class="fixed top-24 left-1/2 -translate-x-1/2 z-[100]">
+      <div class="bg-slate-900 text-white px-5 py-2.5 rounded-full shadow-2xl flex items-center gap-3 border border-white/10">
+        <span class="text-[10px] font-bold uppercase tracking-widest">⏸ Floor Deactivated</span>
+      </div>
+    </div>
+    <div class="fixed inset-0 z-[95] bg-transparent cursor-not-allowed"></div>
+  }
+
+  <!-- Stats bar -->
+  <div class="fixed top-[72px] left-1/2 -translate-x-1/2 z-[80] flex items-center gap-4 bg-white/90 backdrop-blur-md px-5 py-2 rounded-full shadow-lg border border-slate-100">
+    <div class="flex items-center gap-2">
+      <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total</span>
+      <span class="text-sm font-bold text-slate-900">{{ totalSpots() }}</span>
+    </div>
+    <div class="w-px h-4 bg-slate-200"></div>
+    <div class="flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+      <span class="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Available</span>
+      <span class="text-sm font-bold text-emerald-700">{{ availableSpots() }}</span>
+    </div>
+    <div class="w-px h-4 bg-slate-200"></div>
+    <div class="flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+      <span class="text-[10px] font-bold text-blue-600 uppercase tracking-widest">Occupied</span>
+      <span class="text-sm font-bold text-blue-700">{{ totalSpots() - availableSpots() }}</span>
+    </div>
+  </div>
+
+  <!-- View Controls -->
+  @if (!isAnyModalOpen()) {
+    <div class="fixed bottom-10 right-10 z-[80] flex flex-col items-end gap-2">
+      <div class="flex flex-col gap-2 bg-white/90 backdrop-blur-md rounded-2xl shadow-xl border border-slate-100 p-2">
+        <button (click)="toggleViewMode()" class="p-2 rounded-xl transition-all flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest"
+          [class.bg-blue-600]="viewMode() === '3D'" [class.text-white]="viewMode() === '3D'"
+          [class.text-slate-600]="viewMode() !== '3D'">{{ viewMode() }}</button>
+        <div class="h-px bg-slate-100"></div>
+        <button (click)="zoomIn()" class="p-2 hover:bg-slate-100 rounded-xl text-slate-600 text-lg font-bold">+</button>
+        <div class="h-px bg-slate-100"></div>
+        <button (click)="zoomOut()" class="p-2 hover:bg-slate-100 rounded-xl text-slate-600 text-lg font-bold">−</button>
+        <div class="h-px bg-slate-100"></div>
+        <button (click)="resetView()" class="p-2 hover:bg-slate-100 rounded-xl text-slate-600 text-sm font-bold">↺</button>
+        <div class="h-px bg-slate-100"></div>
+        <div class="flex items-center gap-1 p-1">
+          <button (click)="addFloorPrompt()" class="flex-1 p-2 bg-amber-500 text-white rounded-xl shadow-lg hover:bg-amber-600 transition-all font-bold group relative">
+            +
+            <span class="absolute right-full mr-2 px-2 py-1 bg-slate-800 text-[8px] text-white rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Add Floor</span>
+          </button>
+          <button (click)="removeFloorPrompt()" class="flex-1 p-2 bg-red-500 text-white rounded-xl shadow-lg hover:bg-red-600 transition-all font-bold group relative">
+            −
+            <span class="absolute right-full mr-2 px-2 py-1 bg-slate-800 text-[8px] text-white rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Remove Floor</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- Grid -->
+  <div class="w-full h-full p-20 [perspective:2000px] flex items-center justify-center overflow-hidden">
+    <div class="mx-auto bg-white p-12 rounded-[40px] shadow-[0_50px_100px_-20px_rgba(0,0,0,0.1)] border-b-[16px] border-slate-200 border-r-[8px] border-slate-100 [transform-style:preserve-3d] parking-floor transition-transform duration-300 ease-out"
+      [style.display]="'grid'"
+      [style.gridTemplateRows]="'repeat(' + floor()?.rows + ', minmax(80px, 1fr))'"
+      [style.gridTemplateColumns]="'repeat(' + floor()?.cols + ', minmax(100px, 1fr))'"
+      [style.gap]="'12px'" [style.width]="'fit-content'" [style.minWidth]="'min-content'"
+      [style.transform]="'rotateX(' + (viewMode() === '3D' ? rotation().x : 0) + 'deg) rotateZ(' + (viewMode() === '3D' ? rotation().z : 0) + 'deg) scale(' + scale() + ') translate(' + offset().x + 'px, ' + offset().y + 'px)'">
+      @if (floor(); as f) {
+        @for (row of f.grid; track $index; let r = $index) {
+          @for (spot of row; track spot.id; let c = $index) {
+            <app-parking-spot [spot]="spot"
+              [neighbors]="{
+                top: r > 0 && f.grid[r-1][c].type !== 'parking' && f.grid[r-1][c].type !== 'empty',
+                bottom: r < f.rows-1 && f.grid[r+1][c].type !== 'parking' && f.grid[r+1][c].type !== 'empty',
+                left: c > 0 && f.grid[r][c-1].type !== 'parking' && f.grid[r][c-1].type !== 'empty',
+                right: c < f.cols-1 && f.grid[r][c+1].type !== 'parking' && f.grid[r][c+1].type !== 'empty'
+              }"
+              (onClick)="handleSpotClick(r, c)"
+              (onContextMenu)="handleContextMenu($event, r, c)">
+            </app-parking-spot>
+          }
+        }
+      }
+    </div>
+  </div>
+
+  <!-- Context Menu -->
+  @if (selectedSpot() && !isAllocating() && !isViewingDetails() && !isEditingAllocation()) {
+    <div class="context-menu-panel fixed z-50 bg-white/90 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/20 p-4 w-64 modal-content"
+      [style.left.px]="menuPos().x" [style.top.px]="menuPos().y">
+      <h4 class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Spot Type</h4>
+      <div class="grid grid-cols-2 gap-2">
+        @for (item of spotTypes; track item.label) {
+          <button (click)="setSpotType(item.type)"
+            class="py-2 text-[10px] font-bold rounded-lg border transition-all"
+            [class.bg-blue-600]="floor()?.grid?.[selectedSpot()!.r]?.[selectedSpot()!.c]?.type === item.type"
+            [class.text-white]="floor()?.grid?.[selectedSpot()!.r]?.[selectedSpot()!.c]?.type === item.type"
+            [class.border-blue-600]="floor()?.grid?.[selectedSpot()!.r]?.[selectedSpot()!.c]?.type === item.type"
+            [class.bg-slate-50]="floor()?.grid?.[selectedSpot()!.r]?.[selectedSpot()!.c]?.type !== item.type"
+            [class.text-slate-600]="floor()?.grid?.[selectedSpot()!.r]?.[selectedSpot()!.c]?.type !== item.type"
+            [class.border-slate-100]="floor()?.grid?.[selectedSpot()!.r]?.[selectedSpot()!.c]?.type !== item.type">
+            {{ item.label }}
+          </button>
+        }
+      </div>
+    </div>
+  }
+
+  <!-- ── ALLOCATION MODAL ── -->
+  @if ((isAllocating() || isEditingAllocation()) && selectedSpot()) {
+    <div class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" (click)="closeAllocation()">
+      <div class="bg-white rounded-[32px] shadow-2xl w-full max-w-md overflow-hidden modal-content max-h-[90vh] flex flex-col" (click)="$event.stopPropagation()">
+
+        <!-- Header -->
+        <div class="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
+          <div>
+            <h2 class="text-lg font-bold text-slate-900">Allocate Parking Spot</h2>
+            <p class="text-sm text-slate-500">Spot {{ floor()?.grid?.[selectedSpot()!.r]?.[selectedSpot()!.c]?.label }}</p>
+          </div>
+          <button (click)="closeAllocation()" class="p-2 hover:bg-slate-200 rounded-full text-slate-400 text-xl">✕</button>
+        </div>
+
+        <div class="p-6 space-y-5 overflow-y-auto">
+
+          @if (floor()?.apartmentId) {
+            <!-- Residential apartment floor: select customer -->
+            <div>
+              <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">👤 Select Customer</p>
+              @if (loadingCustomers()) {
+                <div class="p-4 text-center text-slate-400 text-sm">Loading customers...</div>
+              } @else if (apartmentCustomers().length === 0) {
+                <div class="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-500 font-medium">
+                  No customers booked in this apartment yet.
+                </div>
+              } @else {
+                <div class="grid gap-2 max-h-48 overflow-y-auto">
+                  @for (c of apartmentCustomers(); track c.customerId) {
+                    <button (click)="selectedCustomer.set(c)"
+                      class="w-full px-4 py-3 rounded-2xl border-2 text-left transition-all"
+                      [class.bg-blue-600]="selectedCustomer()?.customerId === c.customerId"
+                      [class.text-white]="selectedCustomer()?.customerId === c.customerId"
+                      [class.border-blue-600]="selectedCustomer()?.customerId === c.customerId"
+                      [class.bg-white]="selectedCustomer()?.customerId !== c.customerId"
+                      [class.border-slate-200]="selectedCustomer()?.customerId !== c.customerId">
+                      <div class="flex items-center justify-between">
+                        <div>
+                          <p class="font-bold text-sm">{{ c.customerName }}</p>
+                          <p class="text-[10px] font-medium opacity-70">Door: {{ c.doorNo || '—' }} · {{ c.customerMobile || '—' }}</p>
+                        </div>
+                        @if (c.hasParking) {
+                          <span class="text-[9px] font-bold px-2 py-1 rounded-full"
+                            [class.bg-white]="selectedCustomer()?.customerId === c.customerId"
+                            [class.text-blue-600]="selectedCustomer()?.customerId === c.customerId"
+                            [class.bg-green-100]="selectedCustomer()?.customerId !== c.customerId"
+                            [class.text-green-700]="selectedCustomer()?.customerId !== c.customerId">
+                            🅿 {{ c.parkingLabel }}
+                          </span>
+                        }
+                      </div>
+                    </button>
+                  }
+                </div>
+              }
+            </div>
+          }
+
+          <!-- Vehicle Details — shown for ALL floor types -->
+          <div class="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vehicle Details</p>
+
+            @if (floor()?.projectType !== 'public') {
+              <input type="text" [ngModel]="currentVehicle().vehicleNumber"
+                (ngModelChange)="setVehicleNumber($event)"
+                placeholder="Vehicle Number Plate"
+                style="text-transform: uppercase"
+                class="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500" />
+            }
+
+            <div>
+              <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Vehicle Type</p>
+              <div class="grid grid-cols-2 gap-2">
+                @for (vt of parking.state().vehicleTypes; track vt.id) {
+                  <button (click)="setVehicleType(vt.id)"
+                    class="px-3 py-2 rounded-xl flex items-center gap-2 transition-all text-[10px] font-bold"
+                    [class.bg-blue-600]="currentVehicle().vehicleTypeId === vt.id"
+                    [class.text-white]="currentVehicle().vehicleTypeId === vt.id"
+                    [class.bg-white]="currentVehicle().vehicleTypeId !== vt.id"
+                    [class.text-slate-600]="currentVehicle().vehicleTypeId !== vt.id"
+                    [class.border]="currentVehicle().vehicleTypeId !== vt.id">
+                    <span class="text-lg">{{ getIconName(vt.icon) }}</span> {{ vt.name }}
+                  </button>
+                }
+              </div>
+            </div>
+
+            <div>
+              <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Category</p>
+              <div class="grid grid-cols-3 gap-2">
+                @for (cat of parking.state().categories; track cat.id) {
+                  <button (click)="setVehicleCategory(cat.id)"
+                    class="py-2 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 justify-center"
+                    [class.bg-blue-600]="currentVehicle().categoryId === cat.id"
+                    [class.text-white]="currentVehicle().categoryId === cat.id"
+                    [class.bg-white]="currentVehicle().categoryId !== cat.id"
+                    [class.text-slate-600]="currentVehicle().categoryId !== cat.id"
+                    [class.border]="currentVehicle().categoryId !== cat.id">
+                    <div class="w-2 h-2 rounded-full shrink-0" [style.backgroundColor]="cat.color"></div>
+                    {{ cat.name }}
+                  </button>
+                }
+              </div>
+            </div>
+          </div>
+
+          <!-- Confirm -->
+          <button (click)="handleAllocate()"
+            [disabled]="!canConfirmAllocation()"
+            class="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-xl hover:bg-blue-700 disabled:opacity-40 transition-all">
+            ✓ Confirm Allocation
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- ── DETAILS MODAL ── -->
+  @if (isViewingDetails() && selectedSpot()) {
+    <div class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" (click)="closeDetails()">
+      <div class="bg-white rounded-[32px] shadow-2xl w-full max-w-md overflow-hidden modal-content" (click)="$event.stopPropagation()">
+        <div class="p-6 border-b border-slate-100 flex items-center justify-between bg-blue-600">
+          <div>
+            <h2 class="text-lg font-bold text-white">Parking Details</h2>
+            <p class="text-sm text-blue-100">Spot {{ floor()?.grid?.[selectedSpot()!.r]?.[selectedSpot()!.c]?.label }}</p>
+          </div>
+          <button (click)="closeDetails()" class="p-2 hover:bg-white/10 rounded-full text-white text-xl">✕</button>
+        </div>
+
+        <div class="p-6 space-y-4">
+          @if (existingAllocation(); as ap) {
+            <!-- Apartment parking entry -->
+            <div class="bg-blue-50 border border-blue-100 rounded-2xl p-5 space-y-3">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-xl">🏢</div>
+                <div>
+                  <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Apartment</p>
+                  <p class="font-bold text-slate-900">{{ ap.apartmentName }}</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-xl">👤</div>
+                <div>
+                  <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Customer</p>
+                  <p class="font-bold text-slate-900">{{ ap.customerName }}</p>
+                  <p class="text-[11px] text-slate-500">{{ ap.customerMobile || '—' }} · Door: {{ ap.doorNo || '—' }}</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-xl">🅿️</div>
+                <div>
+                  <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Parking Spot</p>
+                  <p class="font-bold text-slate-900">{{ ap.parkingLabel }}</p>
+                </div>
+              </div>
+            </div>
+          } @else {
+            @if (floor()?.grid?.[selectedSpot()!.r]?.[selectedSpot()!.c]?.allocation; as allocation) {
+              <!-- Legacy allocation -->
+              <div class="bg-slate-50 border border-slate-200 rounded-2xl p-5">
+                <p class="font-bold text-slate-900">{{ allocation.customerName || allocation.apartmentNumber }}</p>
+                <p class="text-sm text-slate-500">{{ allocation.phoneNumber || allocation.houseNumber }}</p>
+              </div>
+            }
+          }
+
+          <div class="flex gap-3 pt-2">
+            <button (click)="handleUnoccupy()"
+              class="flex-1 py-3 bg-red-50 text-red-600 rounded-2xl font-bold hover:bg-red-100 transition-all border border-red-100 flex items-center justify-center gap-2">
+              🗑 Remove Allocation
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
+
+</div>

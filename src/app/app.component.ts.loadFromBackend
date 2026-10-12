@@ -1,0 +1,80 @@
+  loadFromBackend() {
+    const companyId = this.auth.getCompanyId();
+    if (!companyId) { this.loadEmptyLayout(); return; }
+
+    // Load project id and layout type
+    this.api.getProject(companyId).subscribe({
+      next: (res: any) => {
+        if (!res.data) {
+          console.error('Project data is null or undefined for company:', companyId);
+          this.loadEmptyLayout();
+          return;
+        }
+        if (res.data?.id) this.projectId.set(String(res.data.id));
+        else this.projectId.set('');
+        if (res.data?.companyLayoutType) this.layoutType.set((res.data.companyLayoutType as string).toUpperCase());
+        this.auth.updateUser({ layoutType: res.data?.companyLayoutType || '' });
+      },
+      error: (err) => {
+        console.error('Failed to load project data:', err);
+        this.loadEmptyLayout();
+      }
+    });
+
+    // Step 1: Load meta only (fast — no plots)
+    this.api.getLayoutMeta(companyId).subscribe({
+      next: (res: any) => {
+        const meta = res.data || {};
+        const H = meta.global?.H ?? meta.hStreets ?? 2;
+        const V = meta.global?.V ?? meta.vStreets ?? 2;
+        const PSB = meta.global?.PSB ?? meta.plotsPerBlock ?? 2;
+        this.hStreets.set(H);
+        this.vStreets.set(V);
+        this.plotsPerBlock.set(PSB);
+        
+        // Restore compass direction from metadata
+        const projectMeta = meta.projectMeta || {};
+        const savedCompassDirection = projectMeta.compassDirection || 'N';
+        this.compassDirection.set(savedCompassDirection as 'N' | 'E' | 'S' | 'W');
+        
+        // Update state with restored projectMeta
+        this.stateService.state.update(s => ({
+          ...s,
+          hStreets: H, vStreets: V, plotsPerBlock: PSB,
+          mergeGroups: meta.mergeGroups || [],
+          hStreetNames: meta.hStreetNames || s.hStreetNames,
+          vStreetNames: meta.vStreetNames || s.vStreetNames,
+          projectMeta,
+          blockOverrides: meta.blockOverrides || {}
+        }));
+
+        // Step 2: Load plots separately
+        this.api.getLayoutPlots(companyId).subscribe({
+          next: (plotsRes: any) => {
+            const allPlots: Record<string, any> = plotsRes.data || {};
+            // Filter out stale plot keys that don't belong to the current grid
+            const validPlots: Record<string, any> = {};
+            const staleKeys: string[] = [];
+            for (const key of Object.keys(allPlots)) {
+              if (this.isValidPlotKey(key, H, V, PSB)) {
+                validPlots[key] = allPlots[key];
+              } else {
+                staleKeys.push(key);
+              }
+            }
+            // Delete stale plots from backend silently
+            staleKeys.forEach(k => this.api.deletePlot(companyId, k).subscribe());
+            this.stateService.state.update(s => ({ ...s, plots: validPlots }));
+            console.log('✅ Layout loaded successfully with compass direction:', this.compassDirection());
+          },
+          error: (err) => {
+            console.error('Failed to load layout plots:', err);
+          }
+        });
+      },
+      error: (err) => {
+        console.error('Failed to load layout metadata:', err);
+        this.loadEmptyLayout();
+      }
+    });
+  }
